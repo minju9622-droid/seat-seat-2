@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CL3 教室座位劃位系統</title>
+  <!-- Firebase SDK (Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    body { background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }
+    .container { max-width: 900px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+    h1 { text-align: center; color: #1a365d; margin-bottom: 20px; font-size: 24px; }
+    
+    .section { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin-bottom: 20px; }
+    .section-title { font-size: 16px; font-weight: bold; color: #2d3748; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+    
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-size: 14px; color: #4a5568; margin-bottom: 5px; font-weight: bold; }
+    input[type="text"], input[type="tel"], select { width: 100%; padding: 10px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: 15px; background: white; }
+    
+    .btn { background-color: #3182ce; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-size: 15px; cursor: pointer; font-weight: bold; width: 100%; transition: background 0.2s; }
+    .btn:hover { background-color: #2b6cb0; }
+    .btn-admin { background-color: #4a5568; margin-top: 10px; }
+    .btn-admin:hover { background-color: #2d3748; }
+
+    .legend { display: flex; justify-content: center; gap: 15px; margin: 15px 0; font-size: 14px; }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-box { width: 16px; height: 16px; border-radius: 4px; }
+    .box-available { background-color: #48bb78; }
+    .box-occupied { background-color: #e53e3e; }
+    .box-mine { background-color: #ed8936; }
+
+    .blackboard { background: #2d3748; color: white; text-align: center; padding: 8px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; letter-spacing: 2px; }
+
+    .seating-grid { display: grid; grid-template-columns: repeat(5, 1fr) 30px repeat(5, 1fr); gap: 8px; margin-top: 15px; }
+    .aisle { grid-column: 6; display: flex; align-items: center; justify-content: center; color: #a0aec0; font-size: 12px; }
+    
+    .seat { aspect-ratio: 1; border-radius: 8px; border: 2px solid #cbd5e0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px; cursor: pointer; text-align: center; font-size: 12px; transition: all 0.2s; background: white; }
+    .seat.available { border-color: #38a169; background-color: #f0fff4; color: #276749; }
+    .seat.available:hover { background-color: #c6f6d5; }
+    .seat.occupied { border-color: #e53e3e; background-color: #fff5f5; color: #9b2c2c; }
+    .seat.mine { border-color: #dd6b20; background-color: #feebc8; color: #9c4221; font-weight: bold; }
+    
+    .seat-num { font-size: 10px; opacity: 0.7; }
+    .seat-name { font-weight: bold; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
+
+    @media (max-width: 600px) {
+      body { padding: 10px; }
+      .container { padding: 15px; }
+      .seating-grid { gap: 4px; }
+      .seat { font-size: 10px; padding: 2px; }
+      .seat-num { font-size: 8px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>CL3 教室座位劃位系統</h1>
+
+  <!-- 基本資料設定 -->
+  <div class="section">
+    <div class="section-title">
+      <span>1. 輸入學生與班級資料</span>
+      <span id="admin-status" style="font-size: 12px; color: #e53e3e; display: none;">【管理員模式】</span>
+    </div>
+    <div class="form-group">
+      <label>班級選擇：</label>
+      <select id="className">
+        <option value="小六資數位上午班">小六資數位上午班</option>
+        <option value="其他班級">其他班級</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>學生姓名：</label>
+      <input type="text" id="studentName" placeholder="例如：王小明">
+    </div>
+    <div class="form-group">
+      <label>家長手機（作劃位辨識）：</label>
+      <input type="tel" id="parentPhone" placeholder="例如：0912345678">
+    </div>
+    <button class="btn" onclick="saveProfile()">保存基本資料</button>
+  </div>
+
+  <!-- 座位圖 -->
+  <div class="section">
+    <div class="section-title">2. 點擊座位完成劃位</div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-box box-available"></div>可選</div>
+      <div class="legend-item"><div class="legend-box box-occupied"></div>已選</div>
+      <div class="legend-item"><div class="legend-box box-mine"></div>您的座位</div>
+    </div>
+
+    <div class="blackboard">講台 / 黑板方向</div>
+    <div class="seating-grid" id="seatingGrid"></div>
+  </div>
+
+  <!-- 管理員入口（隱藏密碼） -->
+  <button class="btn btn-admin" onclick="toggleAdmin()">管理員登入 / 登出</button>
+</div>
+
+<script>
+  // 初始化 Firebase Realtime Database
+  const firebaseConfig = {
+    databaseURL: "https://classroom-seating-jingmei-default-rtdb.firebaseio.com"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const seatsRef = db.ref("seats");
+
+  let currentSeats = {};
+  let isAdmin = false;
+
+  // 載入本地儲存的資料
+  document.getElementById('className').value = localStorage.getItem('cl3_className') || '小六資數位上午班';
+  document.getElementById('studentName').value = localStorage.getItem('cl3_studentName') || '';
+  document.getElementById('parentPhone').value = localStorage.getItem('cl3_parentPhone') || '';
+
+  function saveProfile() {
+    const className = document.getElementById('className').value;
+    const name = document.getElementById('studentName').value.trim();
+    const phone = document.getElementById('parentPhone').value.trim();
+
+    if (!name || !phone) {
+      alert('請填寫完整的學生姓名與家長手機！');
+      return;
+    }
+
+    localStorage.setItem('cl3_className', className);
+    localStorage.setItem('cl3_studentName', name);
+    localStorage.setItem('cl3_parentPhone', phone);
+    alert('資料已保存！');
+    renderGrid();
+  }
+
+  seatsRef.on('value', (snapshot) => {
+    currentSeats = snapshot.val() || {};
+    renderGrid();
+  });
+
+  function renderGrid() {
+    const grid = document.getElementById('seatingGrid');
+    grid.innerHTML = '';
+
+    const myPhone = localStorage.getItem('cl3_parentPhone') || '';
+
+    for (let i = 1; i <= 30; i++) {
+      const seatId = 'seat_' + i;
+      const seatData = currentSeats[seatId];
+
+      const seatEl = document.createElement('div');
+      seatEl.className = 'seat';
+
+      const numEl = document.createElement('div');
+      numEl.className = 'seat-num';
+      numEl.innerText = i + '號';
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'seat-name';
+
+      if (!seatData) {
+        // 空位
+        seatEl.classList.add('available');
+        nameEl.innerText = '空位';
+        seatEl.onclick = () => selectSeat(seatId, i);
+      } else if (seatData.phone === myPhone && myPhone !== '') {
+        // 自己手機劃的位置 -> 顯示自己小孩的名字
+        seatEl.classList.add('mine');
+        nameEl.innerText = seatData.name;
+        seatEl.onclick = () => cancelMySeat(seatId, i);
+      } else {
+        // 其他人劃的位置
+        seatEl.classList.add('occupied');
+        
+        if (isAdmin) {
+          // 管理員可看到詳細資訊，並可點擊進行更改位置或清除
+          nameEl.innerText = seatData.name;
+          seatEl.title = `班級：${seatData.className || '未填寫'}\n家長手機：${seatData.phone}`;
+          seatEl.onclick = () => adminSeatAction(seatId, i, seatData);
+        } else {
+          // 一般家長：絕對看不到別人的名字，一律顯示「已劃位」
+          nameEl.innerText = '已劃位';
+          seatEl.onclick = () => alert(`第 ${i} 號座位已被預訂。`);
+        }
+      }
+
+      seatEl.appendChild(numEl);
+      seatEl.appendChild(nameEl);
+
+      grid.appendChild(seatEl);
+      if (i % 5 === 0 && i % 10 !== 0) {
+        const aisle = document.createElement('div');
+        aisle.className = 'aisle';
+        aisle.innerText = '走道';
+        grid.appendChild(aisle);
+      }
+    }
+  }
+
+  function selectSeat(seatId, seatNum) {
+    const className = document.getElementById('className').value;
+    const name = localStorage.getItem('cl3_studentName');
+    const phone = localStorage.getItem('cl3_parentPhone');
+
+    if (!name || !phone) {
+      alert('請先在上方輸入並保存「學生姓名」與「家長手機」！');
+      return;
+    }
+
+    if (!confirm(`確定要選擇 【第 ${seatNum} 號座位】 嗎？`)) return;
+
+    const targetRef = db.ref('seats/' + seatId);
+    targetRef.transaction((currentData) => {
+      if (currentData === null) {
+        return { className: className, name: name, phone: phone, timestamp: Date.now() };
+      } else {
+        return;
+      }
+    }, (error, committed) => {
+      if (error) {
+        alert('劃位發生錯誤：' + error.message);
+      } else if (!committed) {
+        alert('很抱歉！該座位剛好被其他家長搶先劃走了！');
+      } else {
+        alert(`成功劃位！您選擇的是第 ${seatNum} 號座位。`);
+      }
+    });
+  }
+
+  function cancelMySeat(seatId, seatNum) {
+    if (confirm(`您目前選擇的是【第 ${seatNum} 號座位】，確定要取消預訂嗎？`)) {
+      db.ref('seats/' + seatId).remove()
+        .then(() => alert('已取消劃位！'))
+        .catch((err) => alert('取消失敗：' + err.message));
+    }
+  }
+
+  function toggleAdmin() {
+    if (isAdmin) {
+      isAdmin = false;
+      document.getElementById('admin-status').style.display = 'none';
+      alert('已退出管理員模式');
+      renderGrid();
+    } else {
+      const pwd = prompt('請輸入管理員密碼：');
+      if (pwd === '8888') {
+        isAdmin = true;
+        document.getElementById('admin-status').style.display = 'inline';
+        alert('成功登入管理員模式！');
+        renderGrid();
+      } else if (pwd !== null) {
+        alert('密碼錯誤！');
+      }
+    }
+  }
+
+  function adminSeatAction(seatId, seatNum, seatData) {
+    const choice = prompt(
+      `【管理員選單 - 第 ${seatNum} 號座位】\n` +
+      `學生：${seatData.name} (班級：${seatData.className || '未填'})\n` +
+      `家長手機：${seatData.phone}\n\n` +
+      `請輸入操作編號：\n` +
+      `1. ➡️ 更改/移動此學生到其他座位號碼\n` +
+      `2. 🗑️ 強制清除此座位劃位\n` +
+      `（按取消離開）`
+    );
+
+    if (choice === '1') {
+      const targetNumStr = prompt(`請輸入要將「${seatData.name}」移動到哪一個新座位號碼 (1 ~ 30)：`);
+      const targetNum = parseInt(targetNumStr);
+      
+      if (isNaN(targetNum) || targetNum < 1 || targetNum > 30) {
+        alert('輸入的座位號碼無效，必須在 1 到 30 之間！');
+        return;
+      }
+
+      const newSeatId = 'seat_' + targetNum;
+      if (currentSeats[newSeatId]) {
+        alert(`警告：第 ${targetNum} 號座位目前已經有人（${currentSeats[newSeatId].name}）佔用了！請先將該目標座位清空或移走。`);
+        return;
+      }
+
+      const updates = {};
+      updates['seats/' + seatId] = null;
+      updates['seats/' + newSeatId] = seatData;
+
+      db.ref().update(updates)
+        .then(() => alert(`成功將 ${seatData.name} 從第 ${seatNum} 號移動至第 ${targetNum} 號座位！`))
+        .catch((err) => alert('移動失敗：' + err.message));
+
+    } else if (choice === '2') {
+      if (confirm(`【管理員操作】\n確定要強制清除第 ${seatNum} 號座位（${seatData.name}）的劃位嗎？`)) {
+        db.ref('seats/' + seatId).remove()
+          .then(() => alert('已強制清除該座位劃位！'))
+          .catch((err) => alert('清除失敗：' + err.message));
+      }
+    }
+  }
+</script>
+</body>
+</html>
